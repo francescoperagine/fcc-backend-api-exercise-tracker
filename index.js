@@ -1,18 +1,163 @@
-const express = require('express')
-const app = express()
-const cors = require('cors')
-require('dotenv').config()
+const express = require("express");
+const app = express();
+const cors = require("cors");
+require("dotenv").config();
+const mongoose = require("mongoose");
 
-app.use(cors())
-app.use(express.static('public'))
-app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/views/index.html')
+mongoose.connect(process.env.MONGO_URI).catch((err) => console.log(err));
+
+mongoose.connection.on("error", (err) => {
+  console.log("Mongoose connection error: " + err);
+});
+
+let userSchema = mongoose.Schema(
+  {
+    username: {
+      type: String,
+      required: true,
+    }
+  },
+  { versionKey: false }
+);
+
+let User = mongoose.model("User", userSchema);
+
+let exerciseSchema = mongoose.Schema(
+  {
+    username: {
+      type: String,
+      required: true,
+    },
+    description: {
+      type: String,
+      required: true,
+    },
+    duration: {
+      type: Number,
+      required: true,
+    },
+    date: String,
+    userId: {
+      type: String,
+      required: true,
+    },
+  },
+  { versionKey: false }
+);
+
+let Exercise = mongoose.model("Exercise", exerciseSchema);
+
+
+app.use(cors());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
+app.get("/", (req, res) => {
+  res.sendFile(__dirname + "/views/index.html");
+});
+
+app.post("/api/users", async (req, res) => {
+  let username = req.body.username;
+  let existingUser = await User.findOne({ username })
+  
+  if (username === ""){
+    res.json({error: "username is required"})
+  }
+
+  if (existingUser){
+    return res.json(existingUser)
+  }
+   
+  let user = await User.create({
+    username
+  })
+
+  res.json(user)
+});
+
+app.get("/api/users", async (req, res) => {
+  let usersList = await User.find();
+  res.json(usersList);
 });
 
 
+app.post("/api/users/:_id/exercises", async (req, res) => {
+  let userId = req.params._id;
+  let description = req.body.description;
+  let duration = parseInt(req.body.duration);
+  let date = new Date(req.body.date);
+
+  if (date == "Invalid Date"){
+    date = new Date().toDateString()
+  } else {
+    date = new Date(date).toDateString()
+  }
+
+  if (description === ""){
+    return res.json({error: "description is required"})
+  }
+
+  if (duration === ""){
+    return res.json({error: "duration is required"})
+  } 
+  
+  let user = await User.findById(userId).select("username")
+
+  if (!user){
+    return res.json({error: "unknown userId"})
+  } 
+
+  await Exercise.create({
+    username: user.username,
+    description, 
+    duration, 
+    date,
+    userId,
+  });
+
+  return res.json({
+    _id: user._id,
+    username: user.username,
+    date,
+    duration,
+    description,
+  });
+});
 
 
+app.get("/api/users/:_id/logs", async (req, res) => {
+  let userId = req.params._id;
+  let user = await User.findById(userId).select("username")
+
+  if (!user){
+    return res.json({error: "unknown userId"})
+  }
+  
+  const fromDate = req.query.from ? new Date(req.query.from) : new Date(0);
+  const toDate = req.query.to ? new Date(req.query.to) : new Date();
+  const limit = parseInt(req.query.limit) ?? 0;
+  
+  const from = fromDate.toDateString();
+  const to = toDate.toDateString();
+
+  let opt = {};
+  if (req.query.from && req.query.to){
+    opt = {userId, date: {$gte: from, $lte: to}}
+  } else {
+    opt = {userId}
+  }
+  
+  let count = await Exercise.countDocuments({userId})
+  let log = await Exercise.find({userId}).select('-_id description duration date').limit(limit)
+  
+  const log_response = {
+    _id: userId,
+    username: user.username,
+    count,
+    log
+  }
+  return res.json(log_response);
+});
 
 const listener = app.listen(process.env.PORT || 3000, () => {
-  console.log('Your app is listening on port ' + listener.address().port)
-})
+  console.log("Your app is listening on port " + listener.address().port);
+});
